@@ -17,6 +17,9 @@ export function demoData(): Data {
     password: "demo-pass",
     profiles: 5,
     device_limit: limit,
+    // supplierIn = days left; a Netflix account lasts 30 days from its activation day.
+    activated_on: supplierIn == null ? null : addDays(now, supplierIn - 30),
+    days: 30,
     supplier_end: supplierIn == null ? null : addDays(now, supplierIn),
     note: "",
     archived: false,

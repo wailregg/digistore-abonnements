@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../lib/store";
-import { fmtShort, today, diffDays } from "../lib/dates";
-import { PRODUCTS, clientName, currentSubs, daysLeft, devicesUsed, isActive } from "../lib/logic";
+import { daysLabel, fmtShort, today } from "../lib/dates";
+import { PRODUCTS, TONE_BG, accountLife, clientName, currentSubs, daysLeft, devicesUsed, isActive, toneOf } from "../lib/logic";
 import { searchKey } from "../lib/phone";
 import type { Sub } from "../lib/types";
 import { AccountForm, SubRow } from "../components";
@@ -131,11 +131,9 @@ export function Clients({ product }: { product?: string }) {
             {accounts.map((a) => {
               const used = devicesUsed(a.id, cur, now);
               const over = used > a.device_limit;
-              const supDays = a.supplier_end ? diffDays(now, a.supplier_end) : null;
-              const beyond = a.supplier_end
-                ? cur.filter((s) => s.account_id === a.id && isActive(s, now) && s.end_date > a.supplier_end!).length
-                : 0;
-              const warn = (supDays != null && supDays <= 7) || beyond > 0;
+              const life = accountLife(a, now);
+              const beyond = life ? cur.filter((s) => s.account_id === a.id && isActive(s, now) && s.end_date > life.end).length : 0;
+              const tone = life ? toneOf(life.left) : null;
               return (
                 <div key={a.id} className="box">
                   <div className="row between dark" style={{ padding: "10px 12px" }}>
@@ -153,16 +151,32 @@ export function Clients({ product }: { product?: string }) {
                       أجهزة {used}/{a.device_limit}
                     </span>
                   </div>
-                  <a href={`#/account/${a.id}`} className="row between small b" style={{ minHeight: 44, padding: "6px 12px", borderTop: "2px solid var(--ink)", background: warn ? "var(--coral)" : "var(--mint-soft)" }}>
-                    <span>
-                      {a.supplier_end
-                        ? `عند المورّد ${supDays! < 0 ? "كمّل" : "يكمّل"} ${fmtShort(a.supplier_end)}${beyond ? ` · ${beyond} زبائن يفوتوه` : ""}`
-                        : "زيد تاريخ المورّد"}
+                  <a
+                    href={`#/account/${a.id}`}
+                    className="col small b"
+                    style={{ gap: 6, padding: "8px 12px", borderTop: "2px solid var(--ink)", background: tone ? TONE_BG[tone] : "var(--yellow)", color: tone === "gone" ? "#fff" : "var(--ink)" }}
+                  >
+                    <span className="row between">
+                      <span className="bb" style={{ fontSize: 15 }}>
+                        {life ? `الحساب: ${daysLabel(life.left)}` : "حط نهار التفعيل"}
+                      </span>
+                      <span className="row" style={{ gap: 2 }}>
+                        تفاصيل
+                        <Icon name="chevron" size={16} stroke={2.6} />
+                      </span>
                     </span>
-                    <span className="row" style={{ gap: 2 }}>
-                      تفاصيل الحساب
-                      <Icon name="chevron" size={16} stroke={2.6} />
-                    </span>
+                    {life && (
+                      <>
+                        <div className="bar" aria-hidden="true" style={{ height: 10, borderColor: tone === "gone" ? "#fff" : "var(--ink)" }}>
+                          <span style={{ width: `${(life.passed / life.total) * 100}%`, background: tone === "gone" ? "#fff" : "var(--ink)" }} />
+                        </div>
+                        <span>
+                          {life.start ? `تفعّل ${fmtShort(life.start)} · ` : ""}
+                          {life.left < 0 ? "كمّل" : "يكمّل"} {fmtShort(life.end)}
+                          {beyond ? ` · ${beyond} زبائن يفوتوه` : ""}
+                        </span>
+                      </>
+                    )}
                   </a>
                   {Array.from({ length: a.profiles }, (_, i) => i + 1).map((p) => {
                     const inProfile = productSubs.filter((s) => s.account_id === a.id && s.profile === p);

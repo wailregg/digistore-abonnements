@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useStore } from "../lib/store";
-import { addDays, diffDays, fmtShort, today } from "../lib/dates";
-import { clientName, currentSubs, devicesUsed, fillTemplate, isActive, money, uid } from "../lib/logic";
+import { daysLabel, fmtFull, fmtLong, fmtShort, today } from "../lib/dates";
+import { accountEnd, accountLife, clientName, currentSubs, devicesUsed, fillTemplate, isActive, money, profileUse, TONE_BG, toneOf, uid } from "../lib/logic";
 import { displayPhone } from "../lib/phone";
 import { contact } from "../lib/contact";
 import type { TemplateKey } from "../lib/types";
-import { AccountForm } from "../components";
+import { AccountEndBox, AccountForm } from "../components";
 import { copyText, Header, Icon, Nav, Phone, ProductChip, Seg, Sheet } from "../ui";
 
 export function AccountScreen({ id }: { id: string }) {
@@ -33,8 +33,10 @@ export function AccountScreen({ id }: { id: string }) {
     .filter((s) => s.account_id === a.id && isActive(s, now))
     .sort((x, y) => (x.profile ?? 99) - (y.profile ?? 99));
   const used = devicesUsed(a.id, cur, now);
-  const supDays = a.supplier_end ? diffDays(now, a.supplier_end) : null;
-  const beyond = a.supplier_end ? subs.filter((s) => s.end_date > a.supplier_end!) : [];
+  const life = accountLife(a, now);
+  const tone = life ? toneOf(life.left) : null;
+  const beyond = life ? subs.filter((s) => s.end_date > life.end) : [];
+  const emptyProfiles = [...profileUse(a, cur, now).entries()].filter(([p, l]) => p >= 1 && p <= a.profiles && l.length === 0).length;
   const clients = new Map(data.clients.map((c) => [c.id, c]));
   const spent = data.expenses.filter((e) => e.account_id === a.id).reduce((n, e) => n + e.amount, 0);
 
@@ -83,18 +85,37 @@ export function AccountScreen({ id }: { id: string }) {
       </Header>
 
       <section className="sec" aria-label="حالة الحساب">
-        <div className="stats">
-          <div className="stat" style={{ cursor: "default", background: supDays != null && supDays <= 7 ? "var(--coral)" : "var(--mint)" }}>
+        {life && tone ? (
+          <div
+            className="col"
+            style={{ padding: "14px", gap: 6, background: TONE_BG[tone], color: tone === "gone" ? "#fff" : "var(--ink)", border: "2px solid var(--ink)", boxShadow: "5px 5px 0 var(--ink)" }}
+          >
             <span className="b" style={{ fontSize: 13 }}>
-              عند المورّد {supDays != null && supDays < 0 ? "كمّل" : "يكمّل"}
+              الحساب عند المورّد {life.left < 0 ? "كمّل" : "يكمّل"}
             </span>
-            <span className="n" style={{ fontSize: 30 }}>
-              {a.supplier_end ? fmtShort(a.supplier_end) : "—"}
+            <span style={{ fontSize: 34, lineHeight: 1.15, fontWeight: 900 }}>{daysLabel(life.left)}</span>
+            <span className="b" style={{ fontSize: 15 }}>
+              {fmtLong(life.end)}
             </span>
-            <span className="small">
-              {supDays == null ? "ما كاينش تاريخ" : supDays >= 0 ? `باقي ${supDays} يوم` : `من ${-supDays} يوم`}
-            </span>
+            <div className="bar" aria-hidden="true" style={{ marginTop: 8, borderColor: tone === "gone" ? "#fff" : "var(--ink)" }}>
+              <span style={{ width: `${(life.passed / life.total) * 100}%`, background: tone === "gone" ? "#fff" : "var(--ink)" }} />
+            </div>
+            <div className="row between small">
+              <span>{life.start ? `تفعّل ${fmtFull(life.start)}` : "ما كاينش نهار التفعيل"}</span>
+              <span>
+                {life.passed} من {life.total} يوم
+              </span>
+            </div>
           </div>
+        ) : (
+          <button className="box pad col" style={{ gap: 6, textAlign: "start", background: "var(--yellow)", boxShadow: "5px 5px 0 var(--ink)" }} onClick={() => setEditing(true)}>
+            <span className="bb" style={{ fontSize: 17 }}>
+              حط نهار التفعيل تاع هذا الحساب
+            </span>
+            <span className="small b">البرنامج يحسب {a.days || 30} يوم ويقولك شحال باقي.</span>
+          </button>
+        )}
+        <div className="stats">
           <div className="stat" style={{ cursor: "default", background: used > a.device_limit ? "var(--coral)" : "var(--mint)" }}>
             <span className="b" style={{ fontSize: 13 }}>
               الأجهزة
@@ -103,6 +124,15 @@ export function AccountScreen({ id }: { id: string }) {
               {used} / {a.device_limit}
             </span>
             <span className="small">{used > a.device_limit ? `زايد بـ ${used - a.device_limit}` : used === a.device_limit ? "عامر" : `باقي ${a.device_limit - used}`}</span>
+          </div>
+          <div className="stat" style={{ cursor: "default", background: emptyProfiles > 0 ? "var(--yellow)" : "var(--mint)" }}>
+            <span className="b" style={{ fontSize: 13 }}>
+              بروفايلات فارغين
+            </span>
+            <span className="n" dir="ltr" style={{ fontSize: 30, alignSelf: "flex-start" }}>
+              {emptyProfiles} / {a.profiles}
+            </span>
+            <span className="small">{emptyProfiles > 0 ? "تقدر تبيعهم" : "كامل مبيوعين"}</span>
           </div>
         </div>
         <div className="row between">
@@ -136,7 +166,7 @@ export function AccountScreen({ id }: { id: string }) {
             </span>
             <span style={{ fontSize: 13, lineHeight: 1.7, fontWeight: 600 }}>
               {beyond.map((s) => `${clientName(clients.get(s.client_id))} ${fmtShort(s.end_date)}`).join(" · ")}. جدّد الحساب عند المورّد قبل{" "}
-              {fmtShort(a.supplier_end!)}، ولا بدّلهم لحساب آخر من البطاقة تاعهم.
+              {fmtShort(life!.end)}، ولا بدّلهم لحساب آخر من البطاقة تاعهم.
             </span>
           </div>
         </section>
@@ -251,15 +281,23 @@ function SupplierRenew({ id, onClose }: { id: string; onClose: () => void }) {
   const { data, update, add, toast } = useStore();
   const a = data.accounts.find((x) => x.id === id)!;
   const now = today();
-  const base = a.supplier_end && a.supplier_end > now ? a.supplier_end : now;
-  const [end, setEnd] = useState(addDays(base, 30));
+  // The new 30 days count from the day he renews (he can change the date).
+  const [activated, setActivated] = useState(now);
+  const [days, setDays] = useState(a.days || 30);
   const [cost, setCost] = useState("");
   return (
     <Sheet title={`جدّدت ${a.label} عند المورّد`} onClose={onClose}>
-      <div className="field">
-        <label htmlFor="sr-end">النهاية الجديدة عند المورّد</label>
-        <input id="sr-end" className="input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+      <div className="grid2">
+        <div className="field">
+          <label htmlFor="sr-act">نهار التفعيل الجديد</label>
+          <input id="sr-act" className="input" type="date" value={activated} onChange={(e) => setActivated(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="sr-days">يدوم (يوم)</label>
+          <input id="sr-days" className="input" type="number" inputMode="numeric" min={1} max={366} value={days} onChange={(e) => setDays(Number(e.target.value))} />
+        </div>
       </div>
+      <AccountEndBox activated={activated} days={days} />
       <div className="field">
         <label htmlFor="sr-cost">
           شحال خلّصت (دج) <span className="muted b">(باش يتحسب في «الدراهم»)</span>
@@ -268,9 +306,11 @@ function SupplierRenew({ id, onClose }: { id: string; onClose: () => void }) {
       </div>
       <button
         className="btn btn-y btn-big"
+        disabled={!activated}
         onClick={() =>
           void (async () => {
-            await update("accounts", a.id, { supplier_end: end });
+            const len = Math.min(366, Math.max(1, days || 30));
+            await update("accounts", a.id, { activated_on: activated, days: len, supplier_end: accountEnd(activated, len) });
             const amount = Math.round(Number(cost.replace(/\s/g, "")) || 0);
             if (amount > 0)
               await add("expenses", [

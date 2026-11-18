@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../lib/store";
 import { endFor, fmtDayMonth, monthsLabel, today } from "../lib/dates";
-import { uid } from "../lib/logic";
+import { ACCOUNT_DAYS, accountEnd, uid } from "../lib/logic";
 import { displayPhone } from "../lib/phone";
 import { parseFolder, type Entry, type ParseResult } from "../lib/importer";
 import type { Account, Client, Sub } from "../lib/types";
 import { Header, Icon, Phone, ProductChip } from "../ui";
 
 export function ImportScreen() {
-  const { data, add, toast } = useStore();
+  const { data, add, update, toast } = useStore();
   const now = today();
   const [res, setRes] = useState<ParseResult | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({}); // raw date -> ISO
@@ -18,6 +18,7 @@ export function ImportScreen() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ clients: number; subs: number; accounts: number } | null>(null);
   const [readErr, setReadErr] = useState("");
+  const [filled, setFilled] = useState<{ account: Account; activated: string }[] | null>(null);
 
   async function pick(list: FileList | null) {
     if (!list || list.length === 0) return;
@@ -57,6 +58,30 @@ export function ImportScreen() {
   };
   const allAnswered = unsure.every((u) => answers[u.raw]) && noDate.every((e) => missing[e.id]);
 
+  const findAccount = (product: string, label: string) => data.accounts.find((x) => x.product === product && x.label === label && !x.archived);
+  const datesToFill = res
+    ? res.accounts.flatMap((p) => {
+        const ex = findAccount(p.product, p.label);
+        return ex && !ex.activated_on && p.activated ? [{ account: ex, activated: p.activated }] : [];
+      })
+    : [];
+
+  async function fillDates() {
+    setBusy(true);
+    try {
+      for (const { account, activated } of datesToFill)
+        await update("accounts", account.id, { activated_on: activated, days: account.days || ACCOUNT_DAYS, supplier_end: accountEnd(activated, account.days || ACCOUNT_DAYS) });
+      toast("تزادو التواريخ");
+      setFilled(datesToFill);
+    } catch {
+      /* toast already shown by the store */
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const datesShown = filled ?? datesToFill;
+
   const existingByPhone = new Map(data.clients.filter((c) => c.phone).map((c) => [c.phone, c]));
   const dupKey = (clientId: string, product: string, start: string) => `${clientId}|${product}|${start}`;
   const existingSubs = new Set(data.subs.map((s) => dupKey(s.client_id, s.product, s.start_date)));
@@ -70,9 +95,12 @@ export function ImportScreen() {
       const accIds = new Map<string, string>();
       const newAccounts: Account[] = [];
       for (const a of res.accounts) {
-        const ex = data.accounts.find((x) => x.product === a.product && x.label === a.label && !x.archived);
-        if (ex) accIds.set(a.key, ex.id);
-        else {
+        const ex = findAccount(a.product, a.label);
+        if (ex) {
+          accIds.set(a.key, ex.id);
+          if (!ex.activated_on && a.activated)
+            await update("accounts", ex.id, { activated_on: a.activated, days: ex.days || ACCOUNT_DAYS, supplier_end: accountEnd(a.activated, ex.days || ACCOUNT_DAYS) });
+        } else {
           const id = uid();
           accIds.set(a.key, id);
           newAccounts.push({
@@ -83,7 +111,9 @@ export function ImportScreen() {
             password: "",
             profiles: 5,
             device_limit: data.settings.default_device_limit,
-            supplier_end: null,
+            activated_on: a.activated,
+            days: ACCOUNT_DAYS,
+            supplier_end: accountEnd(a.activated, ACCOUNT_DAYS),
             note: "من الملفات القدام",
             archived: false,
             created_at: ts,
@@ -95,10 +125,23 @@ export function ImportScreen() {
       const byPhone = new Map(existingByPhone);
       const newSubs: Sub[] = [];
       let skipped = 0;
+      const phoneOf = new Map(data.clients.map((c) => [c.id, c.phone]));
+      const noPhoneSubs = new Set(data.subs.filter((x) => !phoneOf.get(x.client_id)).map((x) => `${x.product}|${x.start_date}|${x.account_id}|${x.profile}`));
       for (const e of res.entries) {
         if (e.noPhone && !keepNoPhone) continue;
         const start = dateOf(e);
         if (!start) continue;
+        const accountId = e.accountKey ? accIds.get(e.accountKey) ?? null : null;
+        // A sale with no phone has no client to match on: match it on product, day and slot instead,
+        // so opening the same folder twice does not add it twice.
+        if (!e.phone) {
+          const k = `${e.product}|${start}|${accountId}|${e.profile}`;
+          if (noPhoneSubs.has(k)) {
+            skipped++;
+            continue;
+          }
+          noPhoneSubs.add(k);
+        }
         let client = e.phone ? byPhone.get(e.phone) : undefined;
         if (!client) {
           client = {
@@ -125,7 +168,7 @@ export function ImportScreen() {
           months: e.months,
           start_date: start,
           end_date: endFor(start, e.months),
-          account_id: e.accountKey ? accIds.get(e.accountKey) ?? null : null,
+          account_id: accountId,
           profile: e.profile,
           devices: e.devices,
           price: null,
@@ -164,7 +207,7 @@ export function ImportScreen() {
             <span className="b">
               {done.clients} زبون · {done.subs} اشتراك · {done.accounts} حساب دخلو البرنامج.
             </span>
-            <span className="small">زيد كلمات السر وتواريخ المورّد لكل حساب من «الزبائن».</span>
+            <span className="small">زيد كلمات السر، وحط نهار التفعيل للحسابات اللي ما عندهمش، من «الزبائن».</span>
           </div>
           <a className="btn btn-y btn-big" href="#/">
             روح للرئيسية
@@ -216,6 +259,43 @@ export function ImportScreen() {
               </div>
             </div>
           </section>
+
+          {datesShown.length > 0 && (
+            <section className="sec">
+              <div className="col" style={{ padding: 14, gap: 10, background: "var(--mint)", border: "2px solid var(--ink)", boxShadow: "5px 5px 0 var(--ink)" }}>
+                <span className="bb" style={{ fontSize: 16 }}>
+                  {filled ? "تزادو التواريخ ✓" : `لقيت نهار التفعيل لـ ${datesToFill.length} حسابات راهم في البرنامج`}
+                </span>
+                <div className="box divide">
+                  {datesShown.map(({ account, activated }) => (
+                    <div key={account.id} className="row" style={{ padding: "8px 12px", minHeight: 48 }}>
+                      <ProductChip product={account.product} small />
+                      <span className="b grow">{account.label}</span>
+                      <span className="small b">
+                        تفعّل {fmtDayMonth(activated)} · يكمّل {fmtDayMonth(accountEnd(activated, account.days || ACCOUNT_DAYS)!)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {!filled && (
+                  <>
+                    <button className="btn btn-y" disabled={busy} onClick={() => void fillDates()}>
+                      <Icon name="check" size={18} />
+                      زيد التواريخ للحسابات برك
+                    </button>
+                    <span className="small b" style={{ lineHeight: 1.6 }}>
+                      هذا الزر يزيد التواريخ برك. ما يعاودش الزبائن والبيعات اللي دخلتهم من قبل.
+                    </span>
+                  </>
+                )}
+                {filled && (
+                  <a className="btn" href="#/">
+                    روح للرئيسية
+                  </a>
+                )}
+              </div>
+            </section>
+          )}
 
           {unsure.map((u, i) => (
             <section key={u.raw} className="sec">
@@ -330,7 +410,15 @@ export function ImportScreen() {
             <button className="btn btn-y btn-big" disabled={!allAnswered || busy} onClick={() => void save()}>
               {busy ? "نعمّر…" : "كمّل وعمّر البرنامج"}
             </button>
-            <button type="button" className="btn-plain" onClick={() => setRes(null)} style={{ justifyContent: "center" }}>
+            <button
+              type="button"
+              className="btn-plain"
+              onClick={() => {
+                setRes(null);
+                setFilled(null);
+              }}
+              style={{ justifyContent: "center" }}
+            >
               اختار دوسي آخر
             </button>
           </section>

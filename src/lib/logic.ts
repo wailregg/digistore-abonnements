@@ -95,6 +95,25 @@ export function subWhere(s: Sub, accounts: Map<string, Account>): string {
   return parts.join(" · ");
 }
 
+/** Default length of an account at the supplier. Netflix accounts last exactly 30 days. */
+export const ACCOUNT_DAYS = 30;
+
+/** End of an account at the supplier: activation day + its length. */
+export function accountEnd(activated: string | null, days: number): string | null {
+  return activated ? addDays(activated, days > 0 ? days : ACCOUNT_DAYS) : null;
+}
+
+export type AccountLife = { start: string | null; end: string; total: number; left: number; passed: number };
+
+/** How much is left of an account at the supplier, or null when no date was entered. */
+export function accountLife(a: Pick<Account, "activated_on" | "days" | "supplier_end">, now: string): AccountLife | null {
+  const total = a.days > 0 ? a.days : ACCOUNT_DAYS;
+  const end = a.activated_on ? accountEnd(a.activated_on, total) : a.supplier_end;
+  if (!end) return null;
+  const left = diffDays(now, end);
+  return { start: a.activated_on, end, total, left, passed: Math.min(total, Math.max(0, total - left)) };
+}
+
 export function devicesUsed(accountId: string, current: Sub[], now: string): number {
   return current.filter((s) => s.account_id === accountId && isActive(s, now)).reduce((n, s) => n + s.devices, 0);
 }

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { addDays, endFor } from "./dates";
 import { normPhone, searchKey, waNumber } from "./phone";
-import { currentSubs, moveDue, fillTemplate } from "./logic";
-import { guessDate, parseFolder } from "./importer";
+import { accountEnd, accountLife, currentSubs, moveDue, fillTemplate } from "./logic";
+import { accountDate, guessDate, parseFolder } from "./importer";
 import type { Sub } from "./types";
 
 const sub = (o: Partial<Sub>): Sub => ({
@@ -80,12 +80,36 @@ describe("old files", () => {
       ],
       "2026-11-18",
     );
-    expect(r.accounts).toEqual([{ key: "Netflix|1 mounth (2)", product: "Netflix", label: "حساب 2", email: "acc@example.com" }]);
+    expect(r.accounts).toEqual([{ key: "Netflix|1 mounth (2)", product: "Netflix", label: "حساب 2", email: "acc@example.com", activated: null }]);
     const [a, b, c, d, e] = r.entries;
     expect([a.profile, a.months, a.date?.suggested]).toEqual([3, 6, "2026-10-28"]);
     expect([b.profile, b.months, b.date?.suggested]).toEqual([3, 1, "2026-10-30"]);
     expect([c.profile, c.devices, c.date?.suggested]).toEqual([4, 2, "2026-11-04"]);
     expect([d.product, d.accountKey, d.date?.suggested]).toEqual(["Shahid VIP", null, "2026-11-02"]);
     expect([e.product, e.noPhone, e.date?.suggested]).toEqual(["HBO Max", true, "2026-10-31"]);
+  });
+});
+
+describe("account days at the supplier", () => {
+  test("an account lasts 30 days from its activation day", () => {
+    expect(accountEnd("2026-11-18", 30)).toBe("2026-12-18");
+    expect(accountEnd(null, 30)).toBeNull();
+    const life = accountLife({ activated_on: "2026-11-10", days: 30, supplier_end: null }, "2026-11-18")!;
+    expect([life.end, life.left, life.passed, life.total]).toEqual(["2026-12-10", 22, 8, 30]);
+    expect(accountLife({ activated_on: null, days: 30, supplier_end: null }, "2026-11-18")).toBeNull();
+    const gone = accountLife({ activated_on: "2026-10-01", days: 30, supplier_end: null }, "2026-11-18")!;
+    expect([gone.left, gone.passed]).toEqual([-18, 30]);
+  });
+
+  test("activation day next to the account e-mail", () => {
+    const now = "2026-11-18";
+    expect(accountDate("email of the account 10-31-2026 acc@example.com", now)).toBe("2026-10-31");
+    expect(accountDate("email of the account acc@example.com  (11-04-2026)", now)).toBe("2026-11-04");
+    // 11-09 could be 9 Nov or 11 Sep; an account only lasts 30 days, so 9 Nov.
+    expect(accountDate("acc@example.com (11-09-2026)", now)).toBe("2026-11-09");
+    expect(accountDate("acc@example.com 11-12-2026", now)).toBe("2026-11-12");
+    expect(accountDate("account email acc@example.com", now)).toBeNull();
+    const r = parseFolder([{ path: "les abonmont/netflix 1mounth/1 mounth (3)/email of the account.txt", text: "acc@example.com  (11-04-2026)" }], now);
+    expect(r.accounts[0].activated).toBe("2026-11-04");
   });
 });

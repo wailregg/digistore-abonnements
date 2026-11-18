@@ -8,7 +8,7 @@ export type InFile = { path: string; text: string };
 
 export type DateGuess = { raw: string; options: string[]; suggested: string | null; sure: boolean };
 
-export type ParsedAccount = { key: string; product: string; label: string; email: string };
+export type ParsedAccount = { key: string; product: string; label: string; email: string; activated: string | null };
 
 export type Entry = {
   id: string;
@@ -89,6 +89,19 @@ export function guessDate(raw: string, now: string): DateGuess | null {
   return { raw: label, options: byDist, suggested: byDist[0], sure };
 }
 
+/**
+ * Activation day written next to an account's e-mail ("email of the account 10-31-2026", or
+ * "x@y.com (11-04-2026)" inside the file). An account lasts 30 days, so only a reading from the
+ * last 45 days (or tomorrow at most) makes sense; with exactly one such reading it is taken.
+ */
+export function accountDate(text: string, now: string): string | null {
+  const g = guessDate(text, now);
+  if (!g) return null;
+  const recent = g.options.filter((o) => diffDays(o, now) >= -1 && diffDays(o, now) <= 45);
+  if (recent.length === 1) return recent[0];
+  return g.sure ? g.suggested : null;
+}
+
 function stemOf(path: string): string {
   const base = path.split("/").pop() ?? path;
   return base.replace(/\.[^.]+$/, "");
@@ -149,14 +162,14 @@ export function parseFolder(files: InFile[], now: string): ParseResult {
       const num = accountFolder?.match(/\((\d+)\)/)?.[1];
       const key = product + "|" + (accountFolder ?? "root");
       const label = num ? `حساب ${num}` : accounts.has(key) ? accounts.get(key)!.label : `حساب 1`;
-      accounts.set(key, { key, product, label, email: email[0] });
+      accounts.set(key, { key, product, label, email: email[0], activated: accountDate(stem + " " + f.text, now) });
       continue;
     }
 
     const accountKey = product + "|" + (accountFolder ?? "root");
     if (!accounts.has(accountKey) && accountFolder) {
       const num = accountFolder.match(/\((\d+)\)/)?.[1];
-      accounts.set(accountKey, { key: accountKey, product, label: num ? `حساب ${num}` : accountFolder, email: "" });
+      accounts.set(accountKey, { key: accountKey, product, label: num ? `حساب ${num}` : accountFolder, email: "", activated: null });
     }
 
     const fileDate = guessDate(stem, now);

@@ -15,7 +15,9 @@ export type Account = {
   password: string;
   profiles: number;
   device_limit: number;
-  supplier_end: string | null; // YYYY-MM-DD
+  activated_on: string | null; // YYYY-MM-DD, day the account was activated at the supplier
+  days: number; // how long the account lasts at the supplier (30 for Netflix)
+  supplier_end: string | null; // YYYY-MM-DD = activated_on + days (kept in sync on every save)
   note: string;
   archived: boolean;
   created_at: string;

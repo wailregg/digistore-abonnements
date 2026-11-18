@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../lib/store";
-import { daysLabel, diffDays, fmtLong, fmtShort, monthsLabel, today } from "../lib/dates";
+import { daysLabel, fmtLong, fmtShort, monthsLabel, today } from "../lib/dates";
 import {
   TINT,
+  accountLife,
   clientName,
   currentSubs,
   daysLeft,
@@ -13,12 +14,13 @@ import {
   isActive,
   moveDue,
   subWhere,
+  toneOf,
 } from "../lib/logic";
 import { displayPhone } from "../lib/phone";
 import { contact } from "../lib/contact";
 import type { Sub } from "../lib/types";
 import { MessageBox } from "../components";
-import { Avatar, copyText, Icon, Logo, Nav, Phone, ProductChip } from "../ui";
+import { Avatar, copyText, Icon, Logo, Nav, Phone, ProductChip, ToneChip } from "../ui";
 
 type Tab = "today" | "week" | "ended";
 
@@ -36,17 +38,18 @@ export function Home() {
     const ended = rows.filter((r) => r.d < 0 && r.d >= -30).sort((a, b) => b.d - a.d);
     const active = rows.filter((r) => r.d >= 0);
     const moves = cur.map((s) => ({ s, m: moveDue(s, now) })).filter((x) => x.m) as { s: Sub; m: { due: string; month: number } }[];
-    const accountAlerts = data.accounts
+    const accountRows = data.accounts
       .filter((a) => !a.archived)
       .map((a) => {
         const used = devicesUsed(a.id, cur, now);
-        const supplierDays = a.supplier_end ? diffDays(now, a.supplier_end) : null;
-        const beyond = a.supplier_end
-          ? cur.filter((s) => s.account_id === a.id && isActive(s, now) && s.end_date > a.supplier_end!).length
-          : 0;
-        return { a, used, supplierDays, beyond };
+        const life = accountLife(a, now);
+        const beyond = life ? cur.filter((s) => s.account_id === a.id && isActive(s, now) && s.end_date > life.end).length : 0;
+        return { a, used, life, beyond };
       })
-      .filter((x) => (x.supplierDays != null && x.supplierDays <= 7) || x.used > x.a.device_limit);
+      // Fewest days left first; accounts with no activation day at the end.
+      .sort((x, y) => (x.life?.left ?? 1e6) - (y.life?.left ?? 1e6) || x.a.product.localeCompare(y.a.product) || x.a.label.localeCompare(y.a.label, "ar", { numeric: true }));
+    // Something to do now: too many devices, or clients who outlast an account that ends within a week.
+    const accountAlerts = accountRows.filter((x) => x.used > x.a.device_limit || (x.life && x.life.left <= 7 && x.beyond > 0));
     return {
       cur,
       todayList,
@@ -55,6 +58,7 @@ export function Home() {
       activeCount: active.length,
       productCount: new Set(active.map((r) => r.s.product)).size,
       moves,
+      accountRows,
       accountAlerts,
     };
   }, [data, now]);
@@ -145,7 +149,7 @@ export function Home() {
           {v.moves.map(({ s, m }) => (
             <MoveCard key={s.id} sub={s} month={m.month} />
           ))}
-          {v.accountAlerts.map(({ a, used, supplierDays, beyond }) => (
+          {v.accountAlerts.map(({ a, used, life, beyond }) => (
             <a key={a.id} href={`#/account/${a.id}`} className="box pad row">
               <span className="avatar" style={{ width: 44, height: 44, background: "var(--coral)" }}>
                 <Icon name="alert" size={22} />
@@ -153,11 +157,7 @@ export function Home() {
               <div className="col grow">
                 <span className="b" style={{ fontSize: 15 }}>
                   <span dir="ltr">{a.product}</span> · {a.label}
-                  {supplierDays != null && supplierDays <= 7
-                    ? supplierDays < 0
-                      ? ` كمّل عند المورّد ${fmtShort(a.supplier_end!)}`
-                      : ` يكمّل عند المورّد ${fmtShort(a.supplier_end!)}`
-                    : ""}
+                  {life && life.left <= 7 && beyond > 0 ? ` ${life.left < 0 ? "كمّل" : "يكمّل"} عند المورّد ${fmtShort(life.end)}` : ""}
                 </span>
                 <span className="small muted">
                   {beyond > 0 ? `${beyond} زبائن يفوتو هذا التاريخ · ` : ""}
@@ -168,6 +168,49 @@ export function Home() {
               <Icon name="chevron" />
             </a>
           ))}
+        </section>
+      )}
+
+      {v.accountRows.length > 0 && (
+        <section className="sec" aria-label="الحسابات">
+          <div className="row between" style={{ alignItems: "baseline" }}>
+            <h2 style={{ fontSize: 22 }}>الحسابات</h2>
+            <span className="small b">شحال باقي لكل حساب</span>
+          </div>
+          <div className="box divide">
+            {v.accountRows.map(({ a, life }) => {
+              const tone = life ? toneOf(life.left) : null;
+              return (
+                <a key={a.id} href={`#/account/${a.id}`} className="row" style={{ minHeight: 60, padding: "8px 12px" }}>
+                  <ProductChip product={a.product} small />
+                  <div className="col grow" style={{ gap: 4 }}>
+                    <span className="b" style={{ fontSize: 15 }}>
+                      {a.label}
+                    </span>
+                    {life ? (
+                      <>
+                        <div className="bar" aria-hidden="true" style={{ height: 8 }}>
+                          <span style={{ width: `${(life.passed / life.total) * 100}%` }} />
+                        </div>
+                        <span className="small muted">
+                          {life.left < 0 ? "كمّل" : "يكمّل"} {fmtShort(life.end)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="small muted">ما كاينش نهار التفعيل</span>
+                    )}
+                  </div>
+                  {life && tone ? (
+                    <ToneChip tone={tone}>{daysLabel(life.left)}</ToneChip>
+                  ) : (
+                    <span className="chip" style={{ background: "var(--yellow)" }}>
+                      حط التاريخ
+                    </span>
+                  )}
+                </a>
+              );
+            })}
+          </div>
         </section>
       )}
 

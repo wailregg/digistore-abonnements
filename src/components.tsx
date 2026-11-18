@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from "react";
 import type { Account, Client, Sub } from "./lib/types";
 import { contact } from "./lib/contact";
-import { daysLabel, fmtShort, today } from "./lib/dates";
-import { clientName, daysLeft, nextMove, toneOf } from "./lib/logic";
+import { daysLabel, diffDays, fmtLong, fmtShort, today } from "./lib/dates";
+import { ACCOUNT_DAYS, accountEnd, clientName, daysLeft, nextMove, toneOf } from "./lib/logic";
 import { displayPhone } from "./lib/phone";
 import { useStore } from "./lib/store";
 import { copyText, Icon, Phone, Sheet, ToneChip } from "./ui";
@@ -107,6 +107,27 @@ export function SubRow({
   );
 }
 
+/** Live "ends on … · N days left" box under the activation date. */
+export function AccountEndBox({ activated, days }: { activated: string; days: number }) {
+  const end = accountEnd(activated || null, days);
+  if (!end)
+    return (
+      <div className="box pad small b" style={{ background: "var(--paper)" }}>
+        حط نهار التفعيل، والبرنامج يحسب وحدو {days || ACCOUNT_DAYS} يوم.
+      </div>
+    );
+  const left = diffDays(today(), end);
+  return (
+    <div className="col" style={{ padding: "10px 12px", gap: 2, background: left < 0 ? "var(--ink)" : left <= 7 ? "var(--yellow)" : "var(--mint)", color: left < 0 ? "#fff" : "var(--ink)", border: "2px solid var(--ink)" }}>
+      <span className="small b">يكمّل عند المورّد</span>
+      <span className="bb" style={{ fontSize: 17 }}>
+        {fmtLong(end)}
+      </span>
+      <span className="small b">{daysLabel(left)}</span>
+    </div>
+  );
+}
+
 /** Add or edit a shared account (Netflix etc.). */
 export function AccountForm({ product, account, onClose }: { product: string; account?: Account; onClose: () => void }) {
   const { data, add, update, toast } = useStore();
@@ -116,13 +137,16 @@ export function AccountForm({ product, account, onClose }: { product: string; ac
   const [password, setPassword] = useState(account?.password ?? "");
   const [profiles, setProfiles] = useState(account?.profiles ?? 5);
   const [limit, setLimit] = useState(account?.device_limit ?? data.settings.default_device_limit);
-  const [supplierEnd, setSupplierEnd] = useState(account?.supplier_end ?? "");
+  // A new account starts counting the day it is added; an old one keeps its date.
+  const [activated, setActivated] = useState(account ? account.activated_on ?? "" : today());
+  const [days, setDays] = useState(account?.days ?? ACCOUNT_DAYS);
   const [note, setNote] = useState(account?.note ?? "");
   const [busy, setBusy] = useState(false);
 
   async function save() {
     setBusy(true);
     try {
+      const len = Math.min(366, Math.max(1, days || ACCOUNT_DAYS));
       const row = {
         product,
         label: label.trim() || `حساب ${count + 1}`,
@@ -130,7 +154,9 @@ export function AccountForm({ product, account, onClose }: { product: string; ac
         password,
         profiles: Math.min(20, Math.max(1, profiles)),
         device_limit: Math.min(50, Math.max(1, limit)),
-        supplier_end: supplierEnd || null,
+        activated_on: activated || null,
+        days: len,
+        supplier_end: accountEnd(activated || null, len),
         note,
       };
       if (account) await update("accounts", account.id, row);
@@ -169,10 +195,17 @@ export function AccountForm({ product, account, onClose }: { product: string; ac
           <input id="af-lim" className="input" type="number" inputMode="numeric" min={1} max={50} value={limit} onChange={(e) => setLimit(Number(e.target.value))} />
         </div>
       </div>
-      <div className="field">
-        <label htmlFor="af-sup">وقتاش يكمّل عند المورّد</label>
-        <input id="af-sup" className="input" type="date" value={supplierEnd} onChange={(e) => setSupplierEnd(e.target.value)} />
+      <div className="grid2">
+        <div className="field">
+          <label htmlFor="af-act">نهار التفعيل</label>
+          <input id="af-act" className="input" type="date" value={activated} onChange={(e) => setActivated(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="af-days">يدوم (يوم)</label>
+          <input id="af-days" className="input" type="number" inputMode="numeric" min={1} max={366} value={days} onChange={(e) => setDays(Number(e.target.value))} />
+        </div>
       </div>
+      <AccountEndBox activated={activated} days={days} />
       <div className="field">
         <label htmlFor="af-note">ملاحظة</label>
         <textarea id="af-note" className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
