@@ -3,7 +3,7 @@
 Private tool for the DigiStore owner to track the subscriptions he sells (who, start, end date,
 reminders, WhatsApp renewal messages, accounts and profiles, money).
 
-- Front end: Vite + React, published on GitHub Pages: https://wailregg.github.io/digistore-abonnements/
+- Front end: Vite + React, published on GitHub Pages (`bun run deploy` pushes `dist/` to `gh-pages`): https://wailregg.github.io/digistore-abonnements/
 - Data: a dedicated Supabase project with row-level security. Only the owner's account can read or
   write. The first account created becomes the owner, and later sign-ups are refused by a database
   trigger. No client data is stored in this repository.
