@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>DigiStore</title>
+  <style>@media (prefers-color-scheme: dark) { .shadow { fill: #7fe3ae } }</style>
+  <rect class="shadow" x="11" y="11" width="50" height="50" fill="#111111"/>
+  <rect x="4" y="4" width="50" height="50" fill="#f6d96b" stroke="#111111" stroke-width="5"/>
+  <path d="M33.5 11 16 35.5h13L26.5 51 42 26.5H29.5z" fill="#111111" stroke="#111111" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>
