@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useStore } from "../lib/store";
 import { addDays, diffDays, endFor, fmtLong, fmtShort, monthsLabel, today } from "../lib/dates";
-import { PAY_METHODS, PRODUCTS, SOURCES, clientName, currentSubs, fillTemplate, freeSlots, uid } from "../lib/logic";
+import { PAY_METHODS, PRODUCTS, SOURCES, clientName, currentSubs, devicesUsed, fillTemplate, freeSlots, isActive, profileUse, uid } from "../lib/logic";
 import { displayPhone, normPhone } from "../lib/phone";
 import { contact } from "../lib/contact";
 import type { Client, Sub } from "../lib/types";
@@ -55,6 +55,17 @@ export function AddSale({ query }: { query: URLSearchParams }) {
 
   const accountsFor = data.accounts.filter((a) => a.product === product && !a.archived);
   const knownCurrent = known ? currentSubs(data.subs).find((s) => s.client_id === known.id && s.product === product) : undefined;
+  // Who else is in a profile right now (the client being edited or renewed does not count).
+  const cur = useMemo(() => currentSubs(data.subs), [data.subs]);
+  const othersIn = (accountId: string | null, profile: number | null): string[] => {
+    if (!accountId || profile == null) return [];
+    const acc = data.accounts.find((a) => a.id === accountId);
+    if (!acc) return [];
+    const byId = new Map(data.clients.map((c) => [c.id, c]));
+    return (profileUse(acc, cur, now).get(profile) ?? [])
+      .filter((s) => s.client_id !== base?.client_id && s.client_id !== known?.id)
+      .map((s) => clientName(byId.get(s.client_id)));
+  };
   const slots: Slot[] = useMemo(() => {
     if (accountsFor.length === 0) return [];
     const out: Slot[] = [];
@@ -71,7 +82,15 @@ export function AddSale({ query }: { query: URLSearchParams }) {
     }
     const q = query.get("account");
     if (q && accs.get(q) && !out.some((o) => o.account_id === q && String(o.profile ?? "") === (query.get("profile") ?? ""))) {
-      out.push({ account_id: q, profile: Number(query.get("profile")) || null, label: "البروفايل اللي اخترت", sub: `${accs.get(q)!.label} · بروفايل ${query.get("profile")}`, tag: "فارغ" });
+      const qp = Number(query.get("profile")) || null;
+      const others = othersIn(q, qp);
+      out.push({
+        account_id: q,
+        profile: qp,
+        label: "البروفايل اللي اخترت",
+        sub: `${accs.get(q)!.label} · بروفايل ${query.get("profile")}${others.length ? ` · مع ${others.join("، ")}` : ""}`,
+        tag: others.length ? "مشترك" : "فارغ",
+      });
     }
     for (const f of freeSlots(product, data, now)) {
       if (out.some((o) => o.account_id === f.account.id && o.profile === f.profile)) continue;
@@ -83,6 +102,15 @@ export function AddSale({ query }: { query: URLSearchParams }) {
         tag: out.length === 0 ? "مقترح" : "فارغ",
       });
     }
+    // Profiles that already have someone: another client can share them.
+    for (const a of accountsFor.slice().sort((x, y) => x.label.localeCompare(y.label, "ar", { numeric: true }))) {
+      for (let p = 1; p <= a.profiles; p++) {
+        if (out.some((o) => o.account_id === a.id && o.profile === p)) continue;
+        const others = othersIn(a.id, p);
+        if (others.length === 0) continue;
+        out.push({ account_id: a.id, profile: p, label: "بروفايل مشترك", sub: `${a.label} · بروفايل ${p} · مع ${others.join("، ")}`, tag: "مشترك" });
+      }
+    }
     out.push({ account_id: null, profile: null, label: "بلا حساب", sub: "تختارو مبعد", tag: "" });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -90,6 +118,11 @@ export function AddSale({ query }: { query: URLSearchParams }) {
 
   const slot = slots.find((s) => `${s.account_id ?? ""}|${s.profile ?? ""}` === slotKey) ?? slots[0];
   const account = slot?.account_id ? data.accounts.find((a) => a.id === slot.account_id) : undefined;
+  const sharedWith = slot ? othersIn(slot.account_id, slot.profile) : [];
+  // Devices on the account once this sale is saved (the sub being edited or renewed is replaced, not added).
+  const devicesAfter = account
+    ? devicesUsed(account.id, cur, now) - (base && base.account_id === account.id && cur.includes(base) && isActive(base, now) ? base.devices : 0) + devices
+    : 0;
   const monthOptions = [...new Set([1, 3, 6, 12, months])].sort((a, b) => a - b);
 
   const welcome = fillTemplate(data.settings.templates.welcome, {
@@ -285,6 +318,16 @@ export function AddSale({ query }: { query: URLSearchParams }) {
                     </option>
                   ))}
                 </select>
+              )}
+              {sharedWith.length > 0 && (
+                <span className="small b" style={{ padding: "8px 10px", background: "var(--lilac)", border: "2px solid var(--ink)", lineHeight: 1.6 }}>
+                  يتقاسم بروفايل {slot?.profile} مع {sharedWith.join("، ")}. كل واحد يبقى بالرقم تاعو، والتواريخ تاعو، والتذكير تاعو.
+                </span>
+              )}
+              {account && devicesAfter > account.device_limit && (
+                <span className="small b" style={{ padding: "8px 10px", background: "var(--coral)", border: "2px solid var(--ink)", lineHeight: 1.6 }}>
+                  {account.label} يولّي فيه {devicesAfter} أجهزة، والحد {account.device_limit}.
+                </span>
               )}
             </div>
           </fieldset>

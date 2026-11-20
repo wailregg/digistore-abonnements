@@ -203,6 +203,16 @@ export function Clients({ product }: { product?: string }) {
                         {inProfile.map((s) => (
                           <SubRow key={s.id} sub={s} client={clients.get(s.client_id)} slot={p} shared={activeOnes.length > 1 && isActive(s, now)} />
                         ))}
+                        {activeOnes.length > 0 && (
+                          <a
+                            href={`#/add?product=${encodeURIComponent(prod)}&account=${a.id}&profile=${p}`}
+                            className="row small b"
+                            style={{ minHeight: 44, padding: "6px 12px", gap: 6, background: "var(--paper)", borderTop: "2px dashed var(--ink)" }}
+                          >
+                            <Icon name="plus" size={16} stroke={2.6} />
+                            زيد زبون آخر في بروفايل {p}
+                          </a>
+                        )}
                       </div>
                     );
                   })}
